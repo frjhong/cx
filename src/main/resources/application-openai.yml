@@ -1,0 +1,9 @@
+# =====================================================================
+# openai profile：使用真實 OpenAI 路由（需環境變數 OPENAI_API_KEY）
+# 可與 mock 合併使用：--spring.profiles.active=mock,openai
+#   → 真實 Decisions API 路由 + 內建 Mock Agent + 示範 API Key
+# =====================================================================
+ai-router:
+  classifier:
+    primary: ${AI_ROUTER_CLASSIFIER:DECISIONS}
+    fallback: ${AI_ROUTER_CLASSIFIER_FALLBACK:RESPONSES}

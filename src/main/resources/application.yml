@@ -1,0 +1,150 @@
+# =====================================================================
+# AI Agent 智慧路由系統 — 基礎設定（正式環境導向）
+#
+# 本檔為「正式環境」預設值：使用 OpenAI Decisions API、企業 SSO/JWT 驗證、
+# 實際 Agent API。沒有 OpenAI API Key 或 Agent API 時，請啟用 mock profile：
+#   mvn spring-boot:run -Dspring-boot.run.profiles=mock
+#
+# 所有機密（OpenAI API Key、Agent 服務憑證）一律由環境變數提供，不得寫入本檔。
+# =====================================================================
+spring:
+  application:
+    name: ai-agent-router
+  threads:
+    virtual:
+      enabled: true
+  # 企業 SSO / JWT：請以環境變數設定其中之一（未設定時 JWT 模式無法啟動）
+  #   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI=https://sso.example.com/realms/corp
+  #   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI=https://sso.example.com/.../certs
+
+server:
+  port: ${PORT:8080}
+  error:
+    include-message: never
+    include-stacktrace: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    AUDIT: INFO
+
+# Agent API 位址（以環境變數覆寫；mock profile 會改指向內建 Mock Agent）
+agent-endpoints:
+  finance-url: ${FINANCE_AGENT_URL:https://finance-agent.internal.example.com/api/ask}
+  production-url: ${PRODUCTION_AGENT_URL:https://production-agent.internal.example.com/api/ask}
+
+ai-router:
+  max-question-length: 2000
+
+  classifier:
+    # DECISIONS（優先）| RESPONSES | MOCK | INTERNAL
+    primary: ${AI_ROUTER_CLASSIFIER:DECISIONS}
+    # 主要分類器暫時不可用時的備援：RESPONSES | INTERNAL | NONE
+    fallback: ${AI_ROUTER_CLASSIFIER_FALLBACK:RESPONSES}
+    # 信心門檻：低於此值一律判定 UNCERTAIN，不呼叫任何 Agent。
+    # 注意：0.75 僅為示範初始值，尚未以實際問題集校準；上線前請以標註資料評估後調整。
+    confidence-threshold: ${AI_ROUTER_CONFIDENCE_THRESHOLD:0.75}
+    # 超過兩個 Agent 時，判定「需要某 Agent」的機率門檻（同樣未校準）
+    multi-agent-threshold: 0.5
+    # 多 Agent 合作的路由標籤
+    multi-route-label: BOTH
+    # 僅 Mock / 內部規則分類器使用：判定為 OTHER 的非業務提示詞
+    other-hints: [天氣, 氣溫, 下雨, 颱風, 笑話, 電影, 新聞, 旅遊]
+
+  openai:
+    api-key: ${OPENAI_API_KEY:}
+    base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+    decisions-model: gpt-6-luna   # Decisions API 目前僅支援 gpt-6-luna
+    responses-model: ${OPENAI_RESPONSES_MODEL:gpt-6-luna}
+    timeout: 10s
+    max-retries: 1
+
+  # ---------------------------------------------------------------
+  # Agent 定義（允許清單）。新增 Agent 只需新增一筆，不需修改程式。
+  # id 會作為分類選項值；description 會送給分類模型作為職責說明。
+  # ---------------------------------------------------------------
+  agents:
+    - id: FINANCE
+      name: 財務 AI 特助
+      description: 負責營收、成本、獲利、財務比率；財務報表及經營績效；相關財務資料查詢。
+      url: ${agent-endpoints.finance-url}
+      adapter: finance
+      enabled: ${FINANCE_AGENT_ENABLED:true}
+      timeout: ${FINANCE_AGENT_TIMEOUT:15s}
+      connect-timeout: 3s
+      max-retries: 1
+      idempotent: true          # 純查詢；若 Agent 有副作用請設為 false
+      required-roles: [FINANCE_READER]
+      api-key: ${FINANCE_AGENT_API_KEY:}
+      api-key-header: Authorization
+      # 僅供 Mock / 內部規則分類器使用（真實 AI 路由依 description 判斷語意）
+      routing-hints: [營收, 營業額, 成本, 獲利, 利潤, 毛利, 營業利益, 淨利, 財務, 財報, 報表, EPS, ROE, 負債, 現金流, 費用, 預算]
+    - id: PRODUCTION
+      name: 生產 AI 助理
+      description: 負責生產量、設備稼動率、生產效率；製程、生產排程、實體庫存；生產及製造相關資訊。
+      url: ${agent-endpoints.production-url}
+      adapter: production
+      enabled: ${PRODUCTION_AGENT_ENABLED:true}
+      timeout: ${PRODUCTION_AGENT_TIMEOUT:15s}
+      connect-timeout: 3s
+      max-retries: 1
+      idempotent: true
+      required-roles: [PRODUCTION_READER]
+      api-key: ${PRODUCTION_AGENT_API_KEY:}
+      api-key-header: Authorization
+      routing-hints: [生產, 產量, 產能, 噸, 稼動, 設備, 機台, 製程, 排程, 庫存, 良率, 停機, 產線, 製造]
+
+  agent-url-policy:
+    require-https: true
+    allowed-hosts:
+      - finance-agent.internal.example.com
+      - production-agent.internal.example.com
+
+  security:
+    # JWT（企業 SSO）| API_KEY
+    mode: ${AI_ROUTER_SECURITY_MODE:JWT}
+    required-role: AI_ROUTER_USER
+    jwt-roles-claim: roles
+    api-key-header: X-API-Key
+
+  data-protection:
+    # 偵測到機敏內容時：REJECT（拒絕路由）| INTERNAL_CLASSIFIER（改用內部分類器）| ALLOW
+    external-model-policy: ${AI_ROUTER_EXTERNAL_MODEL_POLICY:REJECT}
+    sensitive-patterns:
+      - name: tw-national-id
+        regex: '\b[A-Z][12]\d{8}\b'
+      - name: credit-card
+        regex: '\b(?:\d[ -]?){12,15}\d\b'
+      - name: email
+        regex: '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+      - name: tw-mobile
+        regex: '\b09\d{2}-?\d{3}-?\d{3}\b'
+      - name: classified-marker
+        regex: '(極機密|機密|密件|confidential|internal\s+only)'
+
+  prompt-injection:
+    # REJECT（拒絕）| FLAG（標記並繼續，仍受其他防護保護）
+    action: REJECT
+    patterns:
+      - name: ignore-instructions-en
+        regex: 'ignore\s+(all\s+|any\s+)?(the\s+)?(previous|prior|above|earlier)\s+(instructions|rules|prompts?)'
+      - name: ignore-instructions-zh
+        regex: '(忽略|無視|忘記|不要理會)(以上|上述|之前|先前|前面|所有|全部)?.{0,10}(指令|指示|規則|設定|提示)'
+      - name: reveal-system-prompt
+        regex: '(system|developer)\s*(prompt|message|instruction)|系統(提示|指令|訊息)'
+      - name: force-route
+        regex: '(路由|轉送|轉給|分類|route|classify)\s*(到|至|成|為|to|as)\s*[「"“]?[A-Z][A-Z_]{2,}'
+      - name: role-override
+        regex: '(you\s+are\s+now|act\s+as|pretend\s+to\s+be|你現在是|從現在起你是|假裝你是|請你扮演)'
+      - name: url-call
+        regex: '(呼叫|調用|請求|連線|call|fetch|request|curl|post)\s*.{0,20}https?://'
+      - name: jailbreak
+        regex: '\b(jailbreak|DAN\s+mode|developer\s+mode)\b'
+
+  mock-agents:
+    enabled: false

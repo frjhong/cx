@@ -1,0 +1,36 @@
+# =====================================================================
+# mock profile：沒有 OpenAI API Key、沒有既有 Agent API 時的示範模式
+#   - 路由分類器：MOCK（規則式，非真實 AI 路由；回應 classifier=MOCK、mockRouting=true）
+#   - Agent：指向本服務內建的 Mock Agent API（/mock-agents/**）
+#   - 驗證：API_KEY（示範金鑰，可用環境變數覆寫）
+# 搭配 openai profile（--spring.profiles.active=mock,openai）可改用真實 Decisions API 路由。
+# =====================================================================
+agent-endpoints:
+  finance-url: ${FINANCE_AGENT_URL:http://localhost:${server.port}/mock-agents/finance}
+  production-url: ${PRODUCTION_AGENT_URL:http://localhost:${server.port}/mock-agents/production}
+
+ai-router:
+  classifier:
+    primary: ${AI_ROUTER_CLASSIFIER:MOCK}
+    fallback: ${AI_ROUTER_CLASSIFIER_FALLBACK:NONE}
+
+  agent-url-policy:
+    require-https: false
+    allowed-hosts: [localhost, 127.0.0.1]
+
+  security:
+    mode: API_KEY
+    # 示範用金鑰（僅限本機示範）；可用環境變數覆寫
+    api-keys:
+      - key: ${DEMO_API_KEY_ALL:demo-all-key}
+        principal: demo-manager
+        roles: [AI_ROUTER_USER, FINANCE_READER, PRODUCTION_READER]
+      - key: ${DEMO_API_KEY_FINANCE:demo-finance-key}
+        principal: demo-finance-analyst
+        roles: [AI_ROUTER_USER, FINANCE_READER]
+      - key: ${DEMO_API_KEY_PRODUCTION:demo-production-key}
+        principal: demo-plant-engineer
+        roles: [AI_ROUTER_USER, PRODUCTION_READER]
+
+  mock-agents:
+    enabled: true
