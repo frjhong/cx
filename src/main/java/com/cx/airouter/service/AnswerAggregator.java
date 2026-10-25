@@ -24,12 +24,14 @@ public class AnswerAggregator {
                 .collect(Collectors.joining("\n\n"));
     }
 
-    public String notRoutedMessage(RouteDecision decision, List<AgentDefinition> candidates) {
-        if (decision.kind() == RouteDecision.Kind.OTHER) {
-            String names = candidates.stream().map(AgentDefinition::name).collect(Collectors.joining("、"));
-            return "此問題不屬於目前支援的 Agent 職責範圍（" + names + "），未轉送至任何 Agent。";
-        }
-        return "無法有把握地判斷應由哪個 Agent 處理（" + decision.reason() + "），為避免錯誤轉送，未呼叫任何 Agent。請補充問題細節後再試。";
+    /**
+     * OTHER 與 UNCERTAIN 共用同一則訊息：評估顯示分類器常在兩者間互換，而兩者都不呼叫 Agent，
+     * 對使用者來說處理方式相同。實際判定與原因仍保留在回應的 {@code route} / {@code reason} 欄位。
+     */
+    public String notRoutedMessage(List<AgentDefinition> candidates) {
+        String names = candidates.stream().map(AgentDefinition::name).collect(Collectors.joining("、"));
+        return "目前只能回答下列 Agent 負責的問題：" + names + "。此問題未轉送至任何 Agent；"
+                + "若與上述範圍有關，請說明要查詢的項目（例如期間、指標）後再試。";
     }
 
     private static String describe(AgentCallResult r) {

@@ -78,10 +78,10 @@ public class AgentRoutingProperties {
         private ClassifierType fallback = ClassifierType.NONE;
         /**
          * 信心門檻。低於此值一律判定為 UNCERTAIN，不呼叫任何 Agent。
-         * 0.75 為示範初始值，<b>尚未以實際問題集校準</b>。
+         * 0.6 依標註問題集校準（見 README「路由評估」）；更換模型或路由規則後需重新評估。
          */
         @DecimalMin("0.0") @DecimalMax("1.0")
-        private double confidenceThreshold = 0.75;
+        private double confidenceThreshold = 0.6;
         /** 超過兩個 Agent 時，多 Agent 路由下判定「需要某 Agent」的機率門檻（同樣未校準）。 */
         @DecimalMin("0.0") @DecimalMax("1.0")
         private double multiAgentThreshold = 0.5;

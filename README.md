@@ -7,7 +7,7 @@
 - Decisions API（`POST /v1/decisions`，`choice` 問題，模型 `gpt-6-luna`）為主；Responses API + Structured Outputs 為備援
 - Agent 定義全部由設定檔管理，新增 Agent 不需修改 Controller 與核心 Router
 
-> **驗證狀態**：所有功能都已用 Mock 測試驗證（87 個測試全部通過）。**還沒有串接過真實的 OpenAI API 與實際 Agent API**，原因是開發環境的網路政策封鎖了 `api.openai.com`，而 Agent 的實際規格也還沒提供。詳見[驗證狀態](#驗證狀態mock-vs-真實串接)。
+> **驗證狀態**：所有功能都已用 Mock 測試驗證（88 個測試全部通過）。**真實 Decisions API 路由已以 300 題標註問題實測**，並據此把信心門檻校準為 0.6（見[路由評估](#路由評估真實-decisions-api)）。Responses API 備援與實際 Agent API 還沒有實際串接。詳見[驗證狀態](#驗證狀態mock-vs-真實串接)。
 
 ---
 
@@ -22,9 +22,10 @@
 7. [企業級資安設計](#企業級資安設計)
 8. [擴充至 10～20 個 Agent](#擴充至-1020-個-agent)
 9. [Decisions API 與 Responses API 比較](#decisions-api-與-responses-api-比較)
-10. [測試](#測試)
-11. [驗證狀態（Mock vs 真實串接）](#驗證狀態mock-vs-真實串接)
-12. [未完成事項與正式上線前注意事項](#未完成事項與正式上線前注意事項)
+10. [路由評估（真實 Decisions API）](#路由評估真實-decisions-api)
+11. [測試](#測試)
+12. [驗證狀態（Mock vs 真實串接）](#驗證狀態mock-vs-真實串接)
+13. [未完成事項與正式上線前注意事項](#未完成事項與正式上線前注意事項)
 
 ---
 
@@ -108,7 +109,7 @@ Response（BOTH 範例；`confidence`、`durationMs` 都是實際執行時算出
 | `confidence` | Decisions：API 回傳的 `confidence`；Responses：模型自評（未校準）；Mock：規則常數 |
 | `classifier` | 實際使用的分類器：`DECISIONS` / `RESPONSES` / `MOCK` / `INTERNAL` |
 | `mockRouting` | `true` 表示 Mock 路由（不是真實 AI） |
-| `status` | `SUCCESS` / `PARTIAL`（多 Agent 部分成功）/ `FAILED` / `NOT_ROUTED`（OTHER、UNCERTAIN） |
+| `status` | `SUCCESS` / `PARTIAL`（多 Agent 部分成功）/ `FAILED` / `NOT_ROUTED`（OTHER、UNCERTAIN；兩者的 `answer` 是同一則提示訊息，以 `route`、`reason` 區分） |
 | `results` | 各 Agent 呼叫結果，保留來源、狀態、耗時、嘗試次數 |
 | `warnings` | 例如已切換備援分類器、已改用內部分類器 |
 
@@ -291,7 +292,7 @@ AgentRouterService
 | `OPENAI_BASE_URL` | OpenAI API 位址（例如企業 API Gateway） | `https://api.openai.com/v1` |
 | `AI_ROUTER_CLASSIFIER` | 主要分類器 `DECISIONS` / `RESPONSES` / `MOCK` / `INTERNAL` | `DECISIONS`（mock profile 為 `MOCK`） |
 | `AI_ROUTER_CLASSIFIER_FALLBACK` | 備援分類器 `RESPONSES` / `INTERNAL` / `NONE` | `RESPONSES` |
-| `AI_ROUTER_CONFIDENCE_THRESHOLD` | 信心門檻 | `0.75`（**示範值，尚未校準**） |
+| `AI_ROUTER_CONFIDENCE_THRESHOLD` | 信心門檻 | `0.6`（依 200 題保留集校準，見[路由評估](#路由評估真實-decisions-api)） |
 | `AI_ROUTER_EXTERNAL_MODEL_POLICY` | 機敏內容政策 `REJECT` / `INTERNAL_CLASSIFIER` / `ALLOW` | `REJECT` |
 | `AI_ROUTER_SECURITY_MODE` | `JWT` / `API_KEY` | `JWT`（mock profile 為 `API_KEY`） |
 | `FINANCE_AGENT_URL`、`PRODUCTION_AGENT_URL` | Agent API 位址 | 範例內部網址 |
@@ -367,7 +368,7 @@ ai-router:
 | 多 Agent 組合 | 組合數隨 Agent 數成長，predicate 錯誤會累加 | 監控 BOTH 路由的組合正確率；必要時改為兩層路由 |
 | 超過約 15 個 | 單層分類維護困難 | 兩層路由：先分領域群組（財務、製造、人資…），再在群組內分 Agent |
 
-> 以上是設計面的評估，**還沒有用實際問題集量測**。上線前應該準備標註資料集（每個 Agent 至少數十題，含邊界題與 OTHER 題）實際量測。
+> 以上是設計面的評估。兩個 Agent 的實測結果見[路由評估](#路由評估真實-decisions-api)；擴充 Agent 後應以 `scripts/eval-routing.py` 和新的標註題目重新量測並校準門檻。
 
 ### 對 Token 成本的影響（估算）
 
@@ -403,6 +404,63 @@ Decisions API 依輸入 Token 計費。**以下價格來自第三方資料（每
 
 ---
 
+## 路由評估（真實 Decisions API）
+
+以 `mock,openai` profile（真實 Decisions API 路由 + 內建 Mock Agent）跑標註問題集，量測分類正確率、`confidence` 與延遲，並據此調整 Agent 描述與信心門檻。
+
+### 執行方式
+
+```bash
+# 門檻設 0，取得低信心題目的原始路由；不同門檻由腳本離線模擬（與 RouteResolver 規則相同）
+AI_ROUTER_CONFIDENCE_THRESHOLD=0 java -jar target/ai-agent-router-0.1.0-SNAPSHOT.jar --spring.profiles.active=mock,openai
+python3 scripts/eval-routing.py eval/phase2-questions.jsonl --out eval/results
+```
+
+> ⚠️ `AI_ROUTER_CONFIDENCE_THRESHOLD=0` 只能用於評估，不可用於正式環境。
+
+| 題庫 | 題數 | 用途 |
+|---|---|---|
+| `eval/phase1-questions.jsonl` | 100（FINANCE 20、PRODUCTION 20、BOTH 20、OTHER 15、語意模糊 15、邊界 8、Prompt Injection 2） | 找出錯誤、調整 Agent 描述與路由規則 |
+| `eval/phase2-questions.jsonl` | 200（FINANCE 40、PRODUCTION 40、BOTH 40、OTHER 30、語意模糊 25、邊界 20、安全防護 5） | **保留集**：與第一階段不重複、沒有參與調整，只用來驗收與校準門檻 |
+
+腳本輸出各類別準確率、混淆矩陣、門檻曲線、`confidence` 分佈與延遲，並另外計算「路由結果」：OTHER 與 UNCERTAIN 都不呼叫 Agent，視為同一種結果，只看有沒有呼叫正確的 Agent。
+
+### 三輪結果
+
+| 輪次 | 題庫 | 變更 | 原始分類準確率 | 門檻 0.75 時：正確 Agent / 不完整 BOTH / 錯誤 Agent / 被擋下 |
+|---|---|---|---|---|
+| v1 | 第一階段（98 題送分類） | 原始描述 | 81% | 50 / 2 / 1 / 15（共 68 題應呼叫 Agent） |
+| v2 | 第一階段 | 擴充 FINANCE／PRODUCTION／BOTH 描述；UNCERTAIN 加上「無法確定時選此項」 | 88% | 49 / 0 / 0 / 19 |
+| v3 | 第一階段 | 移除 UNCERTAIN 的兜底規則；OTHER 改為正面列舉 | 83% | 55 / 0 / 0 / 13 |
+| v3 驗收 | 第二階段保留集（195 題送分類） | — | 86% | 100 / 0 / 0 / 40（共 140 題應呼叫 Agent） |
+
+v3 在保留集上的門檻曲線（140 題應呼叫 Agent、55 題不應呼叫）：
+
+| 門檻 | 正確 Agent | 不完整 BOTH | 錯誤 Agent | 被擋下 | 非業務題誤呼叫 Agent |
+|---|---|---|---|---|---|
+| 0.50 | 122（87%） | 1 | 0 | 17 | 0 |
+| **0.60（預設）** | **115（82%）** | **0** | **0** | **25** | **0** |
+| 0.70 | 101（72%） | 0 | 0 | 39 | 0 |
+| 0.75 | 100（71%） | 0 | 0 | 40 | 0 |
+
+延遲（伺服器 `durationMs`，每題一次 Decisions 呼叫）：p50 約 700 ms、p95 約 890 ms。安全防護題（Prompt Injection 3 題、機敏資料 2 題）全部在送出 OpenAI 前以 422 擋下。
+
+### 結論
+
+1. **Agent 描述要寫明邊界**：真實路由只依 `description` 與路由規則判斷（`routing-hints` 只給 Mock 分類器用）。原始描述沒有提到「存貨金額」，「庫存金額」就以 0.87 被判給生產；「不良品報廢的金額」以 0.98 被判成只需財務。這類高信心錯誤調門檻也擋不住，只能改描述。v2 之後已沒有高信心的錯誤路由。
+2. **兜底規則會壓低整體 confidence**：v2 在 UNCERTAIN 加上「無法確定時選此項而不是 OTHER」，原始準確率雖然上升，但 UNCERTAIN 從所有選項分走機率，OTHER 的 confidence 中位數從 0.99 掉到 0.54，門檻 0.75 下的表現反而變差。v3 已移除。
+3. **門檻改為 0.6**：保留集上 0.6 以上的門檻都沒有呼叫錯誤 Agent，也沒有不完整的 BOTH（140 題都沒有出錯，換算錯誤率的 95% 上限約 2%）；0.6 可回答 82% 的業務問題，0.75 只有 71%。被擋下的題目大多是判對但信心不足的 BOTH 與縮寫題。
+4. **OTHER 與 UNCERTAIN 共用回覆訊息**：保留集上仍有 14/30 題 OTHER 被判成 UNCERTAIN、6/25 題模糊題被判成 OTHER。兩者都不呼叫 Agent，因此統一回覆「目前只能回答…請說明要查詢的項目」，`route` 與 `reason` 欄位仍保留實際判定，供稽核與後續分析。
+5. **已知弱點**：BOTH 判對的題目有 16/37 信心低於 0.75；英文縮寫與中英夾雜（「rev 多少？」「output 跟 sales」）常被判成 UNCERTAIN。
+
+### 後續調整的原則
+
+- 修改 Agent 描述、路由規則、模型或門檻後，先跑第一階段題庫確認沒有退步，再跑保留集驗收
+- 保留集一旦用來調整，就失去驗收的意義；之後的調整應另外準備新的保留集
+- 上線後應從稽核日誌抽樣實際問題、人工標註後加入題庫，定期複核門檻
+
+---
+
 ## 測試
 
 ```bash
@@ -412,7 +470,7 @@ mvn clean verify
 ### 已執行的測試結果
 
 ```
-[INFO] Tests run: 16, Failures: 0, Errors: 0, Skipped: 0 -- in com.cx.airouter.web.DecisionsRoutingIntegrationTest
+[INFO] Tests run: 17, Failures: 0, Errors: 0, Skipped: 0 -- in com.cx.airouter.web.DecisionsRoutingIntegrationTest
 [INFO] Tests run: 5,  Failures: 0, Errors: 0, Skipped: 0 -- in com.cx.airouter.web.ResponsesFallbackIntegrationTest
 [INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0 -- in com.cx.airouter.web.MockModeEndToEndTest
 [INFO] Tests run: 8,  Failures: 0, Errors: 0, Skipped: 0 -- in com.cx.airouter.agent.AgentInvokerTest
@@ -421,7 +479,7 @@ mvn clean verify
 [INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0 -- in com.cx.airouter.service.AgentRouterServiceTest
 [INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0 -- in com.cx.airouter.security.SecurityPatternsTest
 [INFO] Tests run: 4,  Failures: 0, Errors: 0, Skipped: 0 -- in com.cx.airouter.security.JwtSecurityIntegrationTest
-[INFO] Tests run: 87, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Tests run: 88, Failures: 0, Errors: 0, Skipped: 0
 [INFO] BUILD SUCCESS
 ```
 
@@ -444,15 +502,15 @@ mvn clean verify
 
 | 項目 | 狀態 |
 |---|---|
-| Maven 編譯、87 個單元／整合測試 | ✅ 已通過 |
+| Maven 編譯、88 個單元／整合測試 | ✅ 已通過 |
 | Mock 模式啟動與端到端示範（無 API Key、無 Agent API） | ✅ 已實際啟動並以 curl 驗證 |
 | Decisions API 請求格式／回應解析 | ✅ 依官方 OpenAPI 規格，以**真實 SDK** 對**模擬伺服器**驗證 |
 | Responses API 備援 | ✅ 同上（Mock 驗證） |
 | JWT / SSO | ✅ 以 Mock JwtDecoder 驗證角色對應；⚠️ 未與實際 IdP 串接 |
-| **真實 OpenAI Decisions API 呼叫** | ❌ **尚未驗證**：開發環境網路政策封鎖 `api.openai.com`（proxy 回應 403） |
-| **真實 Responses API + gpt-6-luna Structured Outputs** | ❌ 尚未驗證（同上），也還沒確認 `gpt-6-luna` 是否支援 strict JSON Schema |
+| **真實 OpenAI Decisions API 呼叫** | ✅ 已以 `mock,openai` profile 實測 300 題（真實 Decisions 路由 + 內建 Mock Agent），見[路由評估](#路由評估真實-decisions-api) |
+| **真實 Responses API + gpt-6-luna Structured Outputs** | ❌ 尚未驗證：評估期間 Decisions 沒有失敗，未觸發備援；也還沒確認 `gpt-6-luna` 是否支援 strict JSON Schema |
 | **實際財務／生產 Agent API** | ❌ 尚未驗證：規格還沒提供，目前使用假設的 JSON 契約 |
-| 信心門檻 0.75 | ❌ 未校準（示範值） |
+| 信心門檻 | ✅ 依 200 題保留集校準為 0.6；⚠️ 尚未以實際使用者問題複核 |
 
 ---
 
@@ -460,9 +518,9 @@ mvn clean verify
 
 ### 未完成事項
 
-1. **真實 OpenAI 串接驗證**：在可連到 OpenAI 的環境以 `mock,openai` profile 執行四個範例問題，確認 HTTP 狀態（注意功能閘控造成的 403）、`confidence` 分佈與延遲
+1. **Responses API 備援實測**：Decisions 已實測（見[路由評估](#路由評估真實-decisions-api)），Responses 備援仍需以 `AI_ROUTER_CLASSIFIER=RESPONSES` 跑同一批題庫驗證
 2. **Agent 實際 API 規格**：取得後在 `FinanceAgentAdapter` / `ProductionAgentAdapter` 覆寫 `buildRequestBody`、`extractAnswer`，並確認驗證方式（Bearer、mTLS…）與冪等性
-3. **門檻校準**：建立標註問題集，量測各門檻下的正確率與 UNCERTAIN 比例，再決定 `confidence-threshold`
+3. **門檻複核**：門檻已依 200 題保留集校準為 0.6；上線後應以實際使用者問題抽樣標註，定期重跑 `scripts/eval-routing.py` 複核
 4. **內部分類器**：目前 `InternalRoutingClassifier` 只是規則式實作，建議替換為企業內部部署的模型
 5. **確認官方定價與配額**：Decisions API 的價格、rate limit 目前只有第三方資料
 

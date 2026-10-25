@@ -93,7 +93,7 @@ public class AgentRouterService {
             RoutingOutcome outcome;
             if (!decision.routed()) {
                 outcome = new RoutingOutcome(requestId, decision, RoutingOutcome.Status.NOT_ROUTED,
-                        aggregator.notRoutedMessage(decision, candidates), List.of(), elapsedMs(start), warnings);
+                        aggregator.notRoutedMessage(candidates), List.of(), elapsedMs(start), warnings);
             } else {
                 outcome = invokeAgents(requestId, question, caller, decision, warnings, start);
             }

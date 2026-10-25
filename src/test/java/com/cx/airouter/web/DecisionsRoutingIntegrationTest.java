@@ -154,14 +154,29 @@ class DecisionsRoutingIntegrationTest {
     }
 
     @Test
-    @DisplayName("UNCERTAIN：信心 0.60 低於門檻 0.75 → 不任意選擇 Agent")
+    @DisplayName("UNCERTAIN：信心 0.55 低於門檻 0.6 → 不任意選擇 Agent")
     void lowConfidenceBecomesUncertain() {
-        decisionReturns("FINANCE", 0.60);
+        decisionReturns("FINANCE", 0.55);
         JsonNode b = ask("那個數字怎麼樣？").body();
         assertThat(b.get("route").asText()).isEqualTo("UNCERTAIN");
-        assertThat(b.get("confidence").asDouble()).isEqualTo(0.60);
+        assertThat(b.get("confidence").asDouble()).isEqualTo(0.55);
         assertThat(b.get("reason").asText()).contains("低於門檻");
         assertThat(AGENTS.requests("/finance")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("OTHER 與 UNCERTAIN 回覆相同訊息，route / reason 仍保留實際判定")
+    void otherAndUncertainShareMessage() {
+        decisionReturns("OTHER", 0.97);
+        JsonNode other = ask("明天天氣如何？").body();
+        decisionReturns("UNCERTAIN", 0.9);
+        JsonNode uncertain = ask("幫我看一下").body();
+        assertThat(other.get("answer").asText()).isEqualTo(uncertain.get("answer").asText())
+                .contains("財務 AI 特助", "生產 AI 助理");
+        assertThat(other.get("route").asText()).isEqualTo("OTHER");
+        assertThat(uncertain.get("route").asText()).isEqualTo("UNCERTAIN");
+        assertThat(other.get("reason").asText()).isNotEqualTo(uncertain.get("reason").asText());
+        assertThat(other.get("status").asText()).isEqualTo("NOT_ROUTED");
     }
 
     @Test

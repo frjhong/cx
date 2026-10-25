@@ -47,8 +47,9 @@ ai-router:
     # 主要分類器暫時不可用時的備援：RESPONSES | INTERNAL | NONE
     fallback: ${AI_ROUTER_CLASSIFIER_FALLBACK:RESPONSES}
     # 信心門檻：低於此值一律判定 UNCERTAIN，不呼叫任何 Agent。
-    # 注意：0.75 僅為示範初始值，尚未以實際問題集校準；上線前請以標註資料評估後調整。
-    confidence-threshold: ${AI_ROUTER_CONFIDENCE_THRESHOLD:0.75}
+    # 0.6 依 200 題保留集（eval/phase2-questions.jsonl）校準：此門檻下沒有呼叫錯誤 Agent，
+    # 可回答 82% 的業務問題（0.75 僅 71%）。更換模型、Agent 描述或路由規則後請重新評估（scripts/eval-routing.py）。
+    confidence-threshold: ${AI_ROUTER_CONFIDENCE_THRESHOLD:0.6}
     # 超過兩個 Agent 時，判定「需要某 Agent」的機率門檻（同樣未校準）
     multi-agent-threshold: 0.5
     # 多 Agent 合作的路由標籤
