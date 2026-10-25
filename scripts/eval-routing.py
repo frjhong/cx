@@ -115,6 +115,29 @@ def main():
         md.append(f"| {t:.2f} | {acc / len(routed):.0%} | {mis} | {over}/{len(answerable)} |")
     md.append("")
 
+    # 以路由結果評估：OTHER 與 UNCERTAIN 都不呼叫 Agent，視為同一結果
+    agent_qs = [r for r in routed if any(a in AGENT_ROUTES for a in r["accept"])]
+    non_agent_qs = [r for r in routed if r not in agent_qs]
+    md += ["## 路由結果（OTHER 與 UNCERTAIN 視為同一種「不呼叫 Agent」）", "",
+           f"應呼叫 Agent 的題目 {len(agent_qs)} 題；不應呼叫的 {len(non_agent_qs)} 題。", "",
+           "| 門檻 | 正確 Agent | BOTH 只呼叫一個 | 錯誤 Agent | 被擋下 | 非業務題誤呼叫 |",
+           "|---|---|---|---|---|---|"]
+    for t in THRESHOLDS:
+        ok = partial = wrong = blocked = 0
+        for r in agent_qs:
+            f = final_route(r, t)
+            if f in r["accept"]:
+                ok += 1
+            elif f not in AGENT_ROUTES:
+                blocked += 1
+            elif r["expected"] == "BOTH":
+                partial += 1
+            else:
+                wrong += 1
+        leak = sum(final_route(r, t) in AGENT_ROUTES for r in non_agent_qs)
+        md.append(f"| {t:.2f} | {ok} | {partial} | {wrong} | {blocked} | {leak} |")
+    md.append("")
+
     # confidence 分佈
     confs = [r["confidence"] for r in routed if r["confidence"] is not None]
     bins = [(0, 0.5), (0.5, 0.75), (0.75, 0.9), (0.9, 0.99), (0.99, 1.01)]
