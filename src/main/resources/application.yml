@@ -71,7 +71,7 @@ ai-router:
   agents:
     - id: FINANCE
       name: 財務 AI 特助
-      description: 負責營收、成本、獲利、財務比率；財務報表及經營績效；相關財務資料查詢。
+      description: 負責以金額或財務比率呈現的資訊：營收、成本與費用、毛利與獲利、EPS／ROE 等財務比率、預算與資本支出、現金流、應收應付帳款、存貨金額與存貨評價（如跌價損失）、折舊、股利、匯率影響；財務報表及經營績效。也涵蓋常見的財務英文用語與縮寫。
       url: ${agent-endpoints.finance-url}
       adapter: finance
       enabled: ${FINANCE_AGENT_ENABLED:true}
@@ -86,7 +86,7 @@ ai-router:
       routing-hints: [營收, 營業額, 成本, 獲利, 利潤, 毛利, 營業利益, 淨利, 財務, 財報, 報表, EPS, ROE, 負債, 現金流, 費用, 預算]
     - id: PRODUCTION
       name: 生產 AI 助理
-      description: 負責生產量、設備稼動率、生產效率；製程、生產排程、實體庫存；生產及製造相關資訊。
+      description: 負責以數量、時間或比率呈現的生產營運資訊：產量與產出、產能利用率、設備稼動率／OEE、良率與不良品、設備故障與停機、歲修保養、製程參數、生產排程與換線、原料與成品的實體庫存數量；生產及製造相關資訊。問題也可能以英文提出。
       url: ${agent-endpoints.production-url}
       adapter: production
       enabled: ${PRODUCTION_AGENT_ENABLED:true}
